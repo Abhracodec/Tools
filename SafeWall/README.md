@@ -16,12 +16,30 @@ A network monitoring and security tool that detects DDoS attacks and malware sig
 
 ### Windows
 1. Download and install Npcap: https://npcap.com/dist/npcap-1.13.1.exe
-2. Install dependencies: `pip install -r requirements.txt`
-3. Run as Administrator: `python SafeWall.py`
+   - Run installer
+   - Check: "Install Npcap in WinPcap API-compatible mode"
+   - Click Install → Finish
+
+2. Install dependencies:
+```bash
+   pip install -r requirements.txt
+```
+
+3. Run as Administrator:
+```bash
+   python SafeWall.py
+```
 
 ### Linux
-1. Install dependencies: `pip install -r requirements.txt`
-2. Run with sudo: `sudo python3 SafeWall.py`
+1. Install dependencies:
+```bash
+   pip install -r requirements.txt
+```
+
+2. Run with sudo:
+```bash
+   sudo python3 SafeWall.py
+```
 
 ## Configuration
 
@@ -38,6 +56,17 @@ Press `Ctrl+C` to stop monitoring.
 ## Logs
 
 All events are logged to: `logs/security.log`
+
+View logs:
+```bash
+type logs/security.log
+```
+
+## Troubleshooting
+
+- **"no module named scapy"**: Run `pip install scapy`
+- **"permission denied"**: Run Command Prompt as Administrator
+- **"Npcap not found"**: Download from https://npcap.com/
 
 ## License
 
