@@ -59,7 +59,11 @@ Full scan results:
 }
 
 
-def _call_anthropic(key: str, prompt: str) -> str:
+class CreditError(Exception):
+    pass
+
+
+def _call_anthropic(key, prompt):
     resp = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={
@@ -68,19 +72,19 @@ def _call_anthropic(key: str, prompt: str) -> str:
             "content-type":      "application/json",
         },
         json={
-            "model":      "claude-opus-4-6",
+            "model":      "claude-haiku-4-5-20251001",
             "max_tokens": 2048,
             "messages":   [{"role": "user", "content": prompt}],
         },
         timeout=60,
     )
-    if resp.status_code == 402:
+    if resp.status_code in (402, 429):
         raise CreditError()
     resp.raise_for_status()
     return resp.json()["content"][0]["text"]
 
 
-def _call_openai(key: str, prompt: str) -> str:
+def _call_openai(key, prompt):
     resp = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers={
@@ -88,7 +92,7 @@ def _call_openai(key: str, prompt: str) -> str:
             "Content-Type":  "application/json",
         },
         json={
-            "model":      "gpt-4o",
+            "model":      "gpt-4o-mini",
             "max_tokens": 2048,
             "messages":   [{"role": "user", "content": prompt}],
         },
@@ -100,7 +104,7 @@ def _call_openai(key: str, prompt: str) -> str:
     return resp.json()["choices"][0]["message"]["content"]
 
 
-def _call_groq(key: str, prompt: str) -> str:
+def _call_groq(key, prompt):
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={
@@ -120,23 +124,52 @@ def _call_groq(key: str, prompt: str) -> str:
     return resp.json()["choices"][0]["message"]["content"]
 
 
+def _call_gemini(key, prompt):
+    resp = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}",
+        headers={"Content-Type": "application/json"},
+        json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 2048},
+        },
+        timeout=60,
+    )
+    if resp.status_code == 429:
+        raise CreditError()
+    resp.raise_for_status()
+    return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def _call_github(key, prompt):
+    resp = requests.post(
+        "https://models.inference.ai.azure.com/chat/completions",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type":  "application/json",
+        },
+        json={
+            "model":      "gpt-4o",
+            "max_tokens": 2048,
+            "messages":   [{"role": "user", "content": prompt}],
+        },
+        timeout=60,
+    )
+    if resp.status_code == 429:
+        raise CreditError()
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
+
+
 CALLERS = {
     "anthropic": _call_anthropic,
     "openai":    _call_openai,
     "groq":      _call_groq,
+    "gemini":    _call_gemini,
+    "github":    _call_github,
 }
 
 
-class CreditError(Exception):
-    pass
-
-
-def analyze(mode: str, data: dict) -> str | None:
-    """
-    Try every saved key in order until one works.
-    Automatically marks exhausted keys and moves to the next.
-    Returns the AI response string, or None if all keys fail.
-    """
+def analyze(mode, data):
     keys = get_keys()
     if not keys:
         return None
@@ -153,14 +186,11 @@ def analyze(mode: str, data: dict) -> str | None:
 
         try:
             return caller(api_key, prompt)
-
         except CreditError:
             mark_exhausted(api_key)
             continue
-
         except requests.exceptions.Timeout:
             continue
-
         except Exception:
             continue
 
