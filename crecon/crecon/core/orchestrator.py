@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime
 
-from crecon.core import scanner, recon, enumerator
+from crecon.core import scanner, recon, enumerator, nuclei
 
 try:
     import paramiko
@@ -25,8 +25,6 @@ DEFAULT_CREDS = [
     ("user",   "user"),
 ]
 
-
-# ── Nmap ──────────────────────────────────────────────────────────────────────
 
 def run_nmap(target, ports="1-1024", timeout=120):
     if not shutil.which("nmap"):
@@ -57,10 +55,9 @@ def parse_nmap_xml(xml):
         if status is None or status.get("state") != "up":
             continue
 
-        addr = host.find("address[@addrtype='ipv4']")
-        ip   = addr.get("addr") if addr is not None else "?"
-
-        hn   = host.find(".//hostname")
+        addr     = host.find("address[@addrtype='ipv4']")
+        ip       = addr.get("addr") if addr is not None else "?"
+        hn       = host.find(".//hostname")
         hostname = hn.get("name") if hn is not None else ""
 
         os_match = host.find(".//osmatch")
@@ -90,8 +87,6 @@ def parse_nmap_xml(xml):
 
     return hosts
 
-
-# ── Chain triggers ────────────────────────────────────────────────────────────
 
 def trigger_dir_scan(host, port, wordlist, callback=None):
     scheme = "https" if port["port"] in (443, 8443) else "http"
@@ -146,8 +141,6 @@ def trigger_ssh(host, port, creds=None, timeout=5.0, callback=None):
     return hits, None
 
 
-# ── Main orchestration ────────────────────────────────────────────────────────
-
 def run(target, ports="1-1024", wordlist=None, no_ssh=False,
         dry_run=False, callback=None):
 
@@ -157,14 +150,14 @@ def run(target, ports="1-1024", wordlist=None, no_ssh=False,
             "timestamp": datetime.now().isoformat(),
             "dry_run":   dry_run,
         },
-        "hosts":        [],
-        "dirs":         [],
-        "recon":        [],
-        "ssh_hits":     [],
-        "errors":       [],
+        "hosts":    [],
+        "dirs":     [],
+        "recon":    [],
+        "nuclei":   [],
+        "ssh_hits": [],
+        "errors":   [],
     }
 
-    # phase 1 — nmap
     if callback:
         callback({"phase": "nmap", "msg": f"Scanning {target} ports {ports}"})
 
@@ -182,7 +175,6 @@ def run(target, ports="1-1024", wordlist=None, no_ssh=False,
     if not hosts:
         return report
 
-    # phase 2 — chain
     seen_web = set()
 
     for host in hosts:
@@ -199,10 +191,20 @@ def run(target, ports="1-1024", wordlist=None, no_ssh=False,
 
                 if host["ip"] not in seen_web and not dry_run:
                     seen_web.add(host["ip"])
+
                     if callback:
                         callback({"phase": "recon", "msg": f"Port {pnum} open → web recon"})
                     pages = trigger_recon(host, port, callback=callback)
                     report["recon"].extend(pages)
+
+                    if callback:
+                        callback({"phase": "nuclei", "msg": f"Running nuclei against {host['ip']}"})
+                    scheme     = "https" if pnum in (443, 8443) else "http"
+                    target_url = f"{scheme}://{host['hostname'] or host['ip']}:{pnum}"
+                    findings, err = nuclei.scan(target_url, callback=callback)
+                    if err and callback:
+                        callback({"warning": f"nuclei: {err}"})
+                    report["nuclei"].extend(findings)
 
             elif pnum == 22 and not no_ssh and not dry_run:
                 if callback:
