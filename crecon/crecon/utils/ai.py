@@ -112,7 +112,7 @@ def _call_groq(key, prompt):
             "Content-Type":  "application/json",
         },
         json={
-            "model": "llama-3.3-70b-versatile",
+            "model":      "llama-3.3-70b-versatile",
             "max_tokens": 2048,
             "messages":   [{"role": "user", "content": prompt}],
         },
@@ -142,17 +142,17 @@ def _call_gemini(key, prompt):
 
 def _call_github(key, prompt):
     resp = requests.post(
-        "https://models.inference.ai.azure.com/chat/completions",
+        "https://models.github.ai/inference/chat/completions",
         headers={
             "Authorization": f"Bearer {key}",
             "Content-Type":  "application/json",
         },
         json={
-            "model":      "gpt-4o",
-            "max_tokens": 2048,
+            "model":      "deepseek/DeepSeek-R1-0528",
+            "max_tokens": 4096,
             "messages":   [{"role": "user", "content": prompt}],
         },
-        timeout=60,
+        timeout=90,
     )
     if resp.status_code == 429:
         raise CreditError()
