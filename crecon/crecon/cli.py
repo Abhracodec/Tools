@@ -195,7 +195,7 @@ def main():
     cp.add_argument("--remove-key", metavar="N",    type=int, help="Remove key by index")
     cp.add_argument("--list-keys",  action="store_true", help="List all saved keys")
     cp.add_argument("--provider",   default="anthropic",
-                    choices=["anthropic", "openai", "groq"],
+                choices=["anthropic", "openai", "groq", "gemini", "github"],
                     help="Provider for the key (default: anthropic)")
 
     # ── scan ──────────────────────────────────────────────────────────────────
