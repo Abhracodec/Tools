@@ -112,7 +112,7 @@ def _call_groq(key, prompt):
             "Content-Type":  "application/json",
         },
         json={
-            "model":      "llama3-70b-8192",
+            "model": "llama-3.3-70b-versatile",
             "max_tokens": 2048,
             "messages":   [{"role": "user", "content": prompt}],
         },
