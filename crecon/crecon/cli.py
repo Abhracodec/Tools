@@ -4,24 +4,22 @@ import sys
 from pathlib import Path
 
 from crecon.utils.output import (
-    banner, phase, info, success, warn, error, port_line, summary
+    banner, phase, info, success, warn, error, port_line, summary, section
 )
+from crecon.utils.config import add_key, remove_key, list_keys, has_keys
+from crecon.utils import ai
 from crecon.core import scanner, recon, enumerator, orchestrator
 
 
 def handle_callback(event):
     if not isinstance(event, dict):
         return
-
     if "phase" in event:
         print(f"\n  {phase(event['phase'])}  {event['msg']}")
         return
-
     if "warning" in event:
         warn(event["warning"])
         return
-
-    # dir scan hit
     if "code" in event and "url" in event:
         code  = event["code"]
         color = "\033[32m" if code == 200 else "\033[33m"
@@ -29,22 +27,45 @@ def handle_callback(event):
         redir = f"  → {event['redirect']}" if event.get("redirect") else ""
         print(f"    {color}[{code}]{reset}  {event['url']}{redir}")
         return
-
-    # recon page
     if "emails" in event:
-        emails = event.get("emails", [])
-        tech   = event.get("tech", [])
-        if emails:
-            for e in emails:
-                success(f"email  {e}")
+        for e in event.get("emails", []):
+            success(f"email  {e}")
+        tech = event.get("tech", [])
         if tech:
             info(f"tech   {', '.join(tech)}")
         return
-
-    # ssh hit
     if "username" in event:
         success(f"SSH valid  {event['username']}:{event['password']}")
         return
+
+
+def run_ai(mode, data, flag):
+    if not flag:
+        return
+    if not has_keys():
+        error("No API key found. Run: crecon config --add-key <key>")
+        return
+    section("AI Vulnerability Analysis")
+    info("Analyzing findings...")
+    result = ai.analyze(mode, data)
+    if result:
+        print()
+        for line in result.splitlines():
+            print(f"  {line}")
+        print()
+    else:
+        warn("AI analysis failed — check your keys with: crecon config --list-keys")
+
+
+def cmd_config(args):
+    if args.add_key:
+        add_key(args.add_key, provider=args.provider)
+    elif args.remove_key:
+        remove_key(args.remove_key)
+    elif args.list_keys:
+        list_keys()
+    else:
+        error("No option given. Try: crecon config --add-key <key>")
 
 
 def cmd_scan(args):
@@ -77,6 +98,8 @@ def cmd_scan(args):
         )
         info(f"Saved to {args.output}")
 
+    run_ai("scan", {"target": args.target, "open_ports": open_ports}, args.ai)
+
 
 def cmd_recon(args):
     info(f"Target  {args.url}")
@@ -94,17 +117,22 @@ def cmd_recon(args):
         recon.save_csv(results, args.output)
         info(f"CSV saved to {args.output}")
 
+    run_ai("recon", {"url": args.url, "pages": results}, args.ai)
+
 
 def cmd_enum(args):
+    results = []
+
     if args.mode == "dirs":
         info(f"Dir scan  {args.url}")
         print()
-        enumerator.dir_scan(
+        results = enumerator.dir_scan(
             args.url,
             args.wordlist,
             threads  = args.threads,
             callback = handle_callback,
         )
+        run_ai("enum", {"type": "dirs", "url": args.url, "found": results}, args.ai)
 
     elif args.mode == "subs":
         info(f"Subdomain scan  {args.domain}")
@@ -119,6 +147,7 @@ def cmd_enum(args):
             callback    = handle_callback,
         )
         print(f"\n  {len(results)} subdomain(s) found.\n")
+        run_ai("enum", {"type": "subs", "domain": args.domain, "found": results}, args.ai)
 
 
 def cmd_auto(args):
@@ -126,6 +155,8 @@ def cmd_auto(args):
     info(f"Ports       {args.ports}")
     if args.wordlist:
         info(f"Wordlist    {args.wordlist}")
+    if args.ai:
+        info(f"AI mode     enabled")
     print()
 
     report = orchestrator.run(
@@ -145,6 +176,8 @@ def cmd_auto(args):
         Path(args.output).write_text(safe, encoding="utf-8")
         info(f"Report saved to {args.output}")
 
+    run_ai("auto", report, args.ai)
+
 
 def main():
     banner()
@@ -156,6 +189,15 @@ def main():
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    # ── config ────────────────────────────────────────────────────────────────
+    cp = sub.add_parser("config", help="Manage API keys")
+    cp.add_argument("--add-key",    metavar="KEY",  help="Add an API key")
+    cp.add_argument("--remove-key", metavar="N",    type=int, help="Remove key by index")
+    cp.add_argument("--list-keys",  action="store_true", help="List all saved keys")
+    cp.add_argument("--provider",   default="anthropic",
+                    choices=["anthropic", "openai", "groq"],
+                    help="Provider for the key (default: anthropic)")
+
     # ── scan ──────────────────────────────────────────────────────────────────
     sp = sub.add_parser("scan", help="TCP port scanner")
     sp.add_argument("target")
@@ -165,27 +207,31 @@ def main():
     sp.add_argument("--timeout", type=float, default=1.0)
     sp.add_argument("--banners", action="store_true")
     sp.add_argument("--output",  default="")
+    sp.add_argument("--ai",      action="store_true", help="AI vulnerability analysis")
 
     # ── recon ─────────────────────────────────────────────────────────────────
     rp = sub.add_parser("recon", help="Web crawler + contact extractor")
     rp.add_argument("--url",    required=True)
     rp.add_argument("--depth",  type=int, default=20)
     rp.add_argument("--output", default="recon.csv")
+    rp.add_argument("--ai",     action="store_true", help="AI vulnerability analysis")
 
     # ── enum ──────────────────────────────────────────────────────────────────
-    ep = sub.add_parser("enum", help="Directory and subdomain brute-force")
+    ep     = sub.add_parser("enum", help="Directory and subdomain brute-force")
     ep_sub = ep.add_subparsers(dest="mode", required=True)
 
-    dp = ep_sub.add_parser("dirs", help="Directory brute-force")
+    dp = ep_sub.add_parser("dirs")
     dp.add_argument("--url",      required=True)
     dp.add_argument("--wordlist", required=True)
     dp.add_argument("--threads",  type=int, default=15)
+    dp.add_argument("--ai",       action="store_true", help="AI vulnerability analysis")
 
-    sp2 = ep_sub.add_parser("subs", help="Subdomain enumeration")
+    sp2 = ep_sub.add_parser("subs")
     sp2.add_argument("--domain",    required=True)
     sp2.add_argument("--wordlist",  required=True)
     sp2.add_argument("--threads",   type=int, default=20)
     sp2.add_argument("--resolvers", default="")
+    sp2.add_argument("--ai",        action="store_true", help="AI vulnerability analysis")
 
     # ── auto ──────────────────────────────────────────────────────────────────
     ap = sub.add_parser("auto", help="Full auto recon (chains all tools)")
@@ -195,14 +241,16 @@ def main():
     ap.add_argument("--no-ssh",   action="store_true")
     ap.add_argument("--dry-run",  action="store_true")
     ap.add_argument("--output",   default="report.json")
+    ap.add_argument("--ai",       action="store_true", help="AI vulnerability analysis")
 
     args = parser.parse_args()
 
     dispatch = {
-        "scan":  cmd_scan,
-        "recon": cmd_recon,
-        "enum":  cmd_enum,
-        "auto":  cmd_auto,
+        "config": cmd_config,
+        "scan":   cmd_scan,
+        "recon":  cmd_recon,
+        "enum":   cmd_enum,
+        "auto":   cmd_auto,
     }
     dispatch[args.command](args)
 
