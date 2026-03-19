@@ -3,6 +3,7 @@ import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime
+from crecon.core import scanner, recon, enumerator, nuclei, cve
 
 from crecon.core import scanner, recon, enumerator, nuclei
 
@@ -167,6 +168,13 @@ def run(target, ports="1-1024", wordlist=None, no_ssh=False,
             report["errors"].append(err)
             return report
         hosts = parse_nmap_xml(xml)
+
+        # enrich each host's ports with CVE data
+        if callback:
+            callback({"phase": "cve", "msg": "Looking up CVEs for detected services"})
+        for host in hosts:
+            if host["ports"]:
+                host["ports"] = cve.lookup_ports(host["ports"])
     else:
         hosts = []
 
