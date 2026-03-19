@@ -4,7 +4,8 @@ import sys
 from pathlib import Path
 
 from crecon.utils.output import (
-    banner, phase, info, success, warn, error, port_line, summary, section
+    banner, phase, phase_header, info, success, warn, error,
+    port_line, summary, section, divider
 )
 from crecon.utils.config import add_key, remove_key, list_keys, has_keys
 from crecon.utils import ai
@@ -14,12 +15,15 @@ from crecon.core import scanner, recon, enumerator, orchestrator
 def handle_callback(event):
     if not isinstance(event, dict):
         return
+
     if "phase" in event:
-        print(f"\n  {phase(event['phase'])}  {event['msg']}")
+        phase_header(event["phase"], event["msg"])
         return
+
     if "warning" in event:
         warn(event["warning"])
         return
+
     if "code" in event and "url" in event:
         code  = event["code"]
         color = "\033[32m" if code == 200 else "\033[33m"
@@ -27,6 +31,7 @@ def handle_callback(event):
         redir = f"  → {event['redirect']}" if event.get("redirect") else ""
         print(f"    {color}[{code}]{reset}  {event['url']}{redir}")
         return
+
     if "emails" in event:
         for e in event.get("emails", []):
             success(f"email  {e}")
@@ -34,8 +39,14 @@ def handle_callback(event):
         if tech:
             info(f"tech   {', '.join(tech)}")
         return
+
     if "username" in event:
         success(f"SSH valid  {event['username']}:{event['password']}")
+        return
+
+    if "template" in event:
+        from crecon.utils.output import nuclei_hit
+        nuclei_hit(event)
         return
 
 
@@ -46,12 +57,14 @@ def run_ai(mode, data, flag):
         error("No API key found. Run: crecon config --add-key <key>")
         return
     section("AI Vulnerability Analysis")
-    info("Analyzing findings...")
+    info("Analyzing findings — this may take a moment...")
     result = ai.analyze(mode, data)
     if result:
         print()
+        divider()
         for line in result.splitlines():
             print(f"  {line}")
+        divider()
         print()
     else:
         warn("AI analysis failed — check your keys with: crecon config --list-keys")
@@ -74,23 +87,37 @@ def cmd_scan(args):
         error(f"Cannot resolve {args.target}")
         sys.exit(1)
 
-    info(f"Target  {args.target}  ({ip})")
-    info(f"Ports   {args.start}–{args.end}")
-    print()
+    info(f"Target   {args.target}  ({ip})")
+    info(f"Ports    {args.start}–{args.end}")
+    info(f"Threads  {args.threads}")
+    divider()
 
     ports   = list(range(args.start, args.end + 1))
     results = []
+    done    = [0]
+    total   = len(ports)
 
     def on_result(r):
         results.append(r)
+        done[0] += 1
+        pct = done[0] / total * 100
+        bar = "█" * int(pct / 4) + "░" * (25 - int(pct / 4))
+        print(f"\r  [{bar}] {pct:5.1f}%", end="", flush=True)
         if r["state"] == "open":
-            port_line(r["port"], r["service"], version=r.get("banner", ""))
+            print()
+            port_line(
+                r["port"], r["service"],
+                version = r.get("banner", ""),
+                cves    = r.get("cves", []),
+            )
 
     scanner.scan(ip, ports, threads=args.threads,
                  timeout=args.timeout, grab=args.banners, callback=on_result)
 
+    print()
     open_ports = [r for r in results if r["state"] == "open"]
-    print(f"\n  {len(open_ports)} open port(s) found.\n")
+    divider()
+    info(f"{len(open_ports)} open port(s) found.")
 
     if args.output:
         Path(args.output).write_text(
@@ -104,7 +131,7 @@ def cmd_scan(args):
 def cmd_recon(args):
     info(f"Target  {args.url}")
     info(f"Pages   up to {args.depth}")
-    print()
+    divider()
 
     results = recon.crawl(
         args.url,
@@ -113,6 +140,7 @@ def cmd_recon(args):
         callback  = handle_callback,
     )
 
+    divider()
     if args.output:
         recon.save_csv(results, args.output)
         info(f"CSV saved to {args.output}")
@@ -125,18 +153,20 @@ def cmd_enum(args):
 
     if args.mode == "dirs":
         info(f"Dir scan  {args.url}")
-        print()
+        divider()
         results = enumerator.dir_scan(
             args.url,
             args.wordlist,
             threads  = args.threads,
             callback = handle_callback,
         )
+        divider()
+        info(f"{len(results)} path(s) found.")
         run_ai("enum", {"type": "dirs", "url": args.url, "found": results}, args.ai)
 
     elif args.mode == "subs":
         info(f"Subdomain scan  {args.domain}")
-        print()
+        divider()
         ns = [s.strip() for s in args.resolvers.split(",") if s.strip()] \
              if args.resolvers else None
         results = enumerator.subdomain_scan(
@@ -146,18 +176,19 @@ def cmd_enum(args):
             nameservers = ns,
             callback    = handle_callback,
         )
-        print(f"\n  {len(results)} subdomain(s) found.\n")
+        divider()
+        info(f"{len(results)} subdomain(s) found.")
         run_ai("enum", {"type": "subs", "domain": args.domain, "found": results}, args.ai)
 
 
 def cmd_auto(args):
-    info(f"Auto recon  {args.target}")
-    info(f"Ports       {args.ports}")
+    info(f"Target    {args.target}")
+    info(f"Ports     {args.ports}")
     if args.wordlist:
-        info(f"Wordlist    {args.wordlist}")
+        info(f"Wordlist  {args.wordlist}")
     if args.ai:
-        info(f"AI mode     enabled")
-    print()
+        info(f"AI mode   enabled")
+    divider()
 
     report = orchestrator.run(
         target   = args.target,
@@ -191,11 +222,11 @@ def main():
 
     # ── config ────────────────────────────────────────────────────────────────
     cp = sub.add_parser("config", help="Manage API keys")
-    cp.add_argument("--add-key",    metavar="KEY",  help="Add an API key")
-    cp.add_argument("--remove-key", metavar="N",    type=int, help="Remove key by index")
+    cp.add_argument("--add-key",    metavar="KEY", help="Add an API key")
+    cp.add_argument("--remove-key", metavar="N",   type=int, help="Remove key by index")
     cp.add_argument("--list-keys",  action="store_true", help="List all saved keys")
     cp.add_argument("--provider",   default="anthropic",
-                choices=["anthropic", "openai", "groq", "gemini", "github"],
+                    choices=["anthropic", "openai", "groq", "gemini", "github"],
                     help="Provider for the key (default: anthropic)")
 
     # ── scan ──────────────────────────────────────────────────────────────────
