@@ -50,6 +50,98 @@ def handle_callback(event):
         return
 
 
+def _render_ai(text):
+    import re
+    from colorama import Fore, Style
+    B  = Style.BRIGHT
+    D  = Style.RESET_ALL
+    C  = Fore.CYAN
+    Y  = Fore.YELLOW
+    G  = Fore.GREEN
+    R  = Fore.RED
+    M  = Fore.MAGENTA
+    DG = Fore.LIGHTBLACK_EX
+    W  = Fore.WHITE
+
+    for line in text.splitlines():
+        stripped = line.strip()
+
+        # skip empty lines but add spacing
+        if not stripped:
+            print()
+            continue
+
+        # h1 — # Title
+        if stripped.startswith("# ") and not stripped.startswith("##"):
+            title = stripped[2:].upper()
+            print(f"\n  {B}{C}{'━' * 56}{D}")
+            print(f"  {B}{C}  {title}{D}")
+            print(f"  {B}{C}{'━' * 56}{D}")
+
+        # h2 — ## Title
+        elif stripped.startswith("## ") and not stripped.startswith("###"):
+            title = stripped[3:]
+            print(f"\n  {B}{W}  ▌ {title}{D}")
+            print(f"  {DG}  {'─' * 50}{D}")
+
+        # h3 — ### Title
+        elif stripped.startswith("### "):
+            title = stripped[4:]
+            print(f"\n  {B}{Y}  ◆ {title}{D}")
+
+        # h4 — #### Title
+        elif stripped.startswith("#### "):
+            title = stripped[5:]
+            print(f"\n  {M}  ▸ {title}{D}")
+
+        # bullet points
+        elif stripped.startswith(("* ", "- ", "• ")):
+            content = stripped[2:]
+            # highlight key terms
+            content = re.sub(r'\*\*(.+?)\*\*', f'{B}{W}\\1{D}', content)
+            content = re.sub(r'`(.+?)`',        f'{G}\\1{D}',    content)
+
+            # color code by keyword
+            if any(k in content.lower() for k in ("critical", "exploit", "payload", "command")):
+                print(f"  {R}  ●{D} {content}")
+            elif any(k in content.lower() for k in ("high", "vulnerability", "weakness", "attack")):
+                print(f"  {Y}  ●{D} {content}")
+            elif any(k in content.lower() for k in ("medium", "note", "suggest")):
+                print(f"  {C}  ●{D} {content}")
+            else:
+                print(f"  {DG}  ●{D} {content}")
+
+        # numbered list
+        elif re.match(r'^\d+\.', stripped):
+            num, rest = stripped.split(".", 1)
+            rest = rest.strip()
+            rest = re.sub(r'\*\*(.+?)\*\*', f'{B}{W}\\1{D}', rest)
+            rest = re.sub(r'`(.+?)`',        f'{G}\\1{D}',    rest)
+            print(f"\n  {B}{C}  {num}.{D} {rest}")
+
+        # severity lines
+        elif "severity" in stripped.lower():
+            line_clean = re.sub(r'\*\*(.+?)\*\*', f'{B}{W}\\1{D}', stripped)
+            if "critical" in stripped.lower():
+                print(f"  {B}{R}  ⚠ {line_clean}{D}")
+            elif "high" in stripped.lower():
+                print(f"  {R}  ⚠ {line_clean}{D}")
+            elif "medium" in stripped.lower():
+                print(f"  {Y}  ⚠ {line_clean}{D}")
+            else:
+                print(f"  {DG}  ⚠ {line_clean}{D}")
+
+        # code blocks / commands
+        elif stripped.startswith("```") or stripped.endswith("```"):
+            print(f"  {DG}  {'─' * 48}{D}")
+
+        # regular paragraph text
+        else:
+            content = re.sub(r'\*\*(.+?)\*\*', f'{B}{W}\\1{D}', stripped)
+            content = re.sub(r'`(.+?)`',        f'{G}\\1{D}',    content)
+            print(f"  {DG}  {content}{D}")
+
+
 def run_ai(mode, data, flag):
     if not flag:
         return
@@ -61,10 +153,7 @@ def run_ai(mode, data, flag):
     result = ai.analyze(mode, data)
     if result:
         print()
-        divider()
-        for line in result.splitlines():
-            print(f"  {line}")
-        divider()
+        _render_ai(result)
         print()
     else:
         warn("AI analysis failed — check your keys with: crecon config --list-keys")
